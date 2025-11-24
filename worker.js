@@ -2,166 +2,117 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Serve the UI
-    if (url.pathname === '/' || url.pathname === '/index.html') {
+    // Serve the main HTML page at root
+    if (url.pathname === "/" || url.pathname === "/index.html") {
       return new Response(HTML_CONTENT, {
-        headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+        headers: { "content-type": "text/html" },
       });
     }
 
-    // Proxy endpoint
-    if (url.pathname === '/proxy') {
-      const targetUrl = url.searchParams.get('url');
-      if (!targetUrl) {
-        return new Response('URL parameter required', { status: 400 });
-      }
-
-      let target;
-      try {
-        target = new URL(targetUrl);
-      } catch {
-        return new Response('Invalid target URL', { status: 400 });
+    // Proxy endpoint using Browser Rendering API
+    if (url.pathname === "/browse") {
+      const target = url.searchParams.get("url");
+      if (!target) {
+        return new Response("Missing ?url= parameter", { status: 400 });
       }
 
       try {
-        const response = await fetch(target.toString(), {
-          method: request.method,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-            'Accept': request.headers.get('Accept') || '*/*'
-          },
-          body: ['GET', 'HEAD'].includes(request.method)
-            ? undefined
-            : request.body
-        });
+        const browser = await env.BROWSER.newContext();
+        const page = await browser.newPage();
 
-        const contentType = response.headers.get('content-type') || '';
+        // Load the target URL fully rendered
+        await page.goto(target, { waitUntil: "domcontentloaded" });
 
-        // === HTML REWRITE ===
-        if (contentType.includes('text/html')) {
-          let html = await response.text();
+        // Get the rendered HTML content
+        let html = await page.content();
 
-          // Base origin for absolute paths
-          const base = target.origin;
+        await browser.close();
 
-          // 1. Rewrite absolute root paths: /something
-          html = html.replace(
-            /(href|src)=["']\/([^"']*)["']/g,
-            (m, attr, path) =>
-              `${attr}="/proxy?url=${encodeURIComponent(base + '/' + path)}"`
-          );
-
-          // 2. Rewrite absolute URLs
-          html = html.replace(
-            /(href|src)=["'](https?:\/\/[^"']+)["']/g,
-            (m, attr, full) =>
-              `${attr}="/proxy?url=${encodeURIComponent(full)}"`
-          );
-
-          // 3. Rewrite relative paths like ./ and ../
-          html = html.replace(
-            /(href|src)=["'](\.\/|\.\.\/|[^\/][^"']*)["']/g,
-            (m, attr, relPath) => {
-              const absolute = new URL(relPath, target).toString();
-              return `${attr}="/proxy?url=${encodeURIComponent(absolute)}"`;
+        // Rewrite all href and src URLs to route back through the proxy
+        html = html.replace(
+          /(href|src)="(.*?)"/g,
+          (match, attr, value) => {
+            try {
+              const absoluteUrl = new URL(value, target).href;
+              return `${attr}="/browse?url=${encodeURIComponent(absoluteUrl)}"`;
+            } catch {
+              return match;
             }
-          );
+          }
+        );
 
-          return new Response(html, {
-            headers: { 'Content-Type': 'text/html; charset=UTF-8' }
-          });
-        }
-
-        // === BINARY / OTHER TYPES ===
-        const newHeaders = new Headers(response.headers);
-        return new Response(response.body, {
-          status: response.status,
-          headers: newHeaders
+        return new Response(html, {
+          headers: { "content-type": "text/html" },
         });
-
-      } catch (err) {
-        return new Response("Proxy Error: " + err.message, { status: 500 });
+      } catch (e) {
+        return new Response(`Error fetching target: ${e.message}`, { status: 500 });
       }
     }
 
-    return new Response('Not Found', { status: 404 });
-  }
+    return new Response("Not found", { status: 404 });
+  },
 };
 
 const HTML_CONTENT = `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Web Proxy</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: system-ui, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-  .header {
-    background: rgba(255,255,255,0.95);
-    padding: 20px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  }
-  .search-container {
-    max-width: 800px;
-    margin: 0 auto;
-    display: flex;
-    gap: 10px;
-  }
-  input {
-    flex: 1;
-    padding: 12px 20px;
-    border: 2px solid #ddd;
-    border-radius: 25px;
-    font-size: 16px;
-  }
-  button {
-    padding: 12px 30px;
-    background: #667eea;
-    color: white;
-    border: none;
-    border-radius: 25px;
-    cursor: pointer;
-    font-size: 16px;
-    font-weight: 600;
-  }
-  iframe {
-    flex: 1;
-    border: none;
-    background: white;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Browser Rendering Proxy</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 1rem; background: #f0f0f0;
+    }
+    input {
+      width: 80%;
+      padding: 0.5rem;
+      font-size: 1rem;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      margin-right: 0.5rem;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      border-radius: 6px;
+      border: none;
+      background-color: #667eea;
+      color: white;
+      cursor: pointer;
+    }
+    iframe {
+      margin-top: 1rem;
+      width: 100%;
+      height: 90vh;
+      border: none;
+      background: white;
+    }
+  </style>
 </head>
 <body>
-<div class="header">
-  <div class="search-container">
-    <input id="urlInput" placeholder="Enter URL" value="https://example.com">
-    <button onclick="loadUrl()">Go</button>
-  </div>
-</div>
-
-<iframe id="proxyFrame"></iframe>
-
-<script>
-function loadUrl() {
-  const url = document.getElementById('urlInput').value.trim();
-  try { new URL(url); }
-  catch { return alert("Invalid URL"); }
-
-  document.getElementById('proxyFrame').src =
-    '/proxy?url=' + encodeURIComponent(url);
-}
-
-document.getElementById('urlInput')
-  .addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') loadUrl();
-  });
-</script>
+  <h1>Browser Rendering Proxy</h1>
+  <input type="text" id="urlInput" placeholder="Enter URL (e.g. https://example.com)" />
+  <button onclick="loadUrl()">Go</button>
+  <iframe id="proxyFrame"></iframe>
+  <script>
+    function loadUrl() {
+      const url = document.getElementById('urlInput').value;
+      if (!url) {
+        alert('Please enter a URL');
+        return;
+      }
+      try {
+        new URL(url);
+      } catch {
+        alert('Invalid URL');
+        return;
+      }
+      document.getElementById('proxyFrame').src = '/browse?url=' + encodeURIComponent(url);
+    }
+    document.getElementById('urlInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') loadUrl();
+    });
+  </script>
 </body>
 </html>`;
