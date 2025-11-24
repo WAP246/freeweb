@@ -1,5 +1,6 @@
-name = "proxy-worker"
-type = "javascript"
+name = "web-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
 
 [env.production]
-route = "https://proxy.yoursite.com/*"
+name = "web-proxy"
