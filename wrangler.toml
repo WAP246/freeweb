@@ -1,6 +1,5 @@
-name = "freeweb"
-main = "worker.js"
-compatibility_date = "2024-01-01"
+name = "proxy-worker"
+type = "javascript"
 
 [env.production]
-name = "free-web"
+route = "https://proxy.yoursite.com/*"
